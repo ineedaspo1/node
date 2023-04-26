@@ -19,6 +19,8 @@ package endpoints
 
 import (
 	"encoding/json"
+	"github.com/mysteriumnetwork/node/tequilapi/sso"
+	"github.com/rs/zerolog/log"
 	"net/http"
 	"time"
 
@@ -34,6 +36,7 @@ import (
 type authenticationAPI struct {
 	jwtAuthenticator jwtAuthenticator
 	authenticator    authenticator
+	ssoMystnodes     *sso.Mystnodes
 }
 
 type jwtAuthenticator interface {
@@ -53,20 +56,22 @@ type authenticator interface {
 //   - in: body
 //     name: body
 //     schema:
-//       $ref: "#/definitions/AuthRequest"
+//     $ref: "#/definitions/AuthRequest"
+//
 // responses:
-//   200:
-//     description: Authentication succeeded
-//     schema:
-//       "$ref": "#/definitions/AuthResponse"
-//   400:
-//     description: Failed to parse or request validation failed
-//     schema:
-//       "$ref": "#/definitions/APIError"
-//   401:
-//     description: Authentication failed
-//     schema:
-//       "$ref": "#/definitions/APIError"
+//
+//	200:
+//	  description: Authentication succeeded
+//	  schema:
+//	    "$ref": "#/definitions/AuthResponse"
+//	400:
+//	  description: Failed to parse or request validation failed
+//	  schema:
+//	    "$ref": "#/definitions/APIError"
+//	401:
+//	  description: Authentication failed
+//	  schema:
+//	    "$ref": "#/definitions/APIError"
 func (api *authenticationAPI) Authenticate(c *gin.Context) {
 	req, err := toAuthRequest(c.Request)
 	if err != nil {
@@ -97,20 +102,22 @@ func (api *authenticationAPI) Authenticate(c *gin.Context) {
 //   - in: body
 //     name: body
 //     schema:
-//       $ref: "#/definitions/AuthRequest"
+//     $ref: "#/definitions/AuthRequest"
+//
 // responses:
-//   200:
-//     description: Authentication succeeded
-//     schema:
-//       "$ref": "#/definitions/AuthResponse"
-//   400:
-//     description: Failed to parse or request validation failed
-//     schema:
-//       "$ref": "#/definitions/APIError"
-//   401:
-//     description: Authentication failed
-//     schema:
-//       "$ref": "#/definitions/APIError"
+//
+//	200:
+//	  description: Authentication succeeded
+//	  schema:
+//	    "$ref": "#/definitions/AuthResponse"
+//	400:
+//	  description: Failed to parse or request validation failed
+//	  schema:
+//	    "$ref": "#/definitions/APIError"
+//	401:
+//	  description: Authentication failed
+//	  schema:
+//	    "$ref": "#/definitions/APIError"
 func (api *authenticationAPI) Login(c *gin.Context) {
 	req, err := toAuthRequest(c.Request)
 	if err != nil {
@@ -142,13 +149,35 @@ func (api *authenticationAPI) Login(c *gin.Context) {
 	utils.WriteAsJSON(response, c.Writer)
 }
 
+// swagger:operation GET /auth/login-mystnodes Authentication SSO
+// ---
+// summary: LoginMystnodes
+// description: SSO init endpoint to auth via mystnodes
+//
+// responses:
+//
+//	200:
+//	  description: link response
+//	  schema:
+//	    "$ref": "#/definitions/MystnodesSSOLinkResponse"
+func (api *authenticationAPI) LoginMystnodes(c *gin.Context) {
+	link, err := api.ssoMystnodes.SSOLink()
+	if err != nil {
+		log.Err(err).Msg("failed to generate mystnodes SSO link")
+		c.AbortWithStatus(418)
+		return
+	}
+	c.JSON(200, contract.MystnodesSSOLinkResponse{Link: link.String()})
+}
+
 // swagger:operation DELETE /auth/logout Authentication Logout
 // ---
 // summary: Logout
 // description: Clears authentication cookie
 // responses:
-//   200:
-//     description: Logged out successfully
+//
+//	200:
+//	  description: Logged out successfully
 func (api *authenticationAPI) Logout(c *gin.Context) {
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     auth.JWTCookieName,
@@ -169,18 +198,20 @@ func (api *authenticationAPI) Logout(c *gin.Context) {
 //   - in: body
 //     name: body
 //     schema:
-//       $ref: "#/definitions/ChangePasswordRequest"
+//     $ref: "#/definitions/ChangePasswordRequest"
+//
 // responses:
-//   200:
-//     description: Password changed successfully
-//   400:
-//     description: Failed to parse or request validation failed
-//     schema:
-//       "$ref": "#/definitions/APIError"
-//   401:
-//     description: Unauthorized
-//     schema:
-//       "$ref": "#/definitions/APIError"
+//
+//	200:
+//	  description: Password changed successfully
+//	400:
+//	  description: Failed to parse or request validation failed
+//	  schema:
+//	    "$ref": "#/definitions/APIError"
+//	401:
+//	  description: Unauthorized
+//	  schema:
+//	    "$ref": "#/definitions/APIError"
 func (api *authenticationAPI) ChangePassword(c *gin.Context) {
 	var req *contract.ChangePasswordRequest
 	var err error
@@ -214,10 +245,12 @@ func toChangePasswordRequest(req *http.Request) (*contract.ChangePasswordRequest
 func AddRoutesForAuthentication(
 	auth authenticator,
 	jwtAuth jwtAuthenticator,
+	ssoMystnodes *sso.Mystnodes,
 ) func(*gin.Engine) error {
 	api := &authenticationAPI{
 		authenticator:    auth,
 		jwtAuthenticator: jwtAuth,
+		ssoMystnodes:     ssoMystnodes,
 	}
 	return func(e *gin.Engine) error {
 		g := e.Group("/auth")
@@ -225,6 +258,7 @@ func AddRoutesForAuthentication(
 			g.PUT("/password", api.ChangePassword)
 			g.POST("/authenticate", api.Authenticate)
 			g.POST("/login", api.Login)
+			g.GET("/login-mystnodes", api.LoginMystnodes)
 			g.DELETE("/logout", api.Logout)
 		}
 		return nil
